@@ -1,0 +1,268 @@
+
+import { useState, useEffect } from "react";
+import {
+  ArrowUpRight, Hand, Activity,
+  BrainCircuit, Camera, GitBranch
+} from "lucide-react";
+
+import RobotHand from "./RobotHand";
+import LiveTranslator from "./LiveTranslator";
+import "./App.css";
+
+const API = "http://127.0.0.1:8000";
+const LETTERS = "ABCDEFGHIKLMNOPQRSTUVWXY".split("");
+
+function App() {
+  const [online, setOnline] = useState(false);
+  const [expanded, setExpanded] = useState(false);
+  const [target, setTarget] = useState("B");
+
+  useEffect(() => {
+    async function check() {
+      try {
+        const response = await fetch(`${API}/api/health`);
+        setOnline(response.ok);
+      } catch {
+        setOnline(false);
+      }
+    }
+
+    check();
+    const timer = setInterval(check, 10000);
+    return () => clearInterval(timer);
+  }, []);
+
+  return (
+    <>
+      <nav className="navbar">
+        <a className="brand" href="#home">
+          <Hand size={25} />
+          SIGNIFY<span>AI</span>
+        </a>
+
+        <div className="nav-links">
+          <a href="#home">Home</a>
+          <a href="#translator">Translate</a>
+          <a href="#learn">Learn ASL</a>
+          <a href="#analytics">Analytics</a>
+          <a href="#about">About</a>
+        </div>
+
+        <div className={`system-status ${online ? "online" : ""}`}>
+          <i />
+          {online ? "System online" : "Backend offline"}
+        </div>
+      </nav>
+
+      <main>
+        <section id="home" className="hero">
+          <div className="hero-glow" />
+
+          <div className="hero-content">
+            <div className="eyebrow">
+              HUMAN × MACHINE INTELLIGENCE
+            </div>
+
+            <h1>
+              Human gestures.
+              <span>Infinite possibilities.</span>
+            </h1>
+
+            <p>
+              Where human expression meets machine intelligence.
+              Experience a new dimension of communication
+              with real-time sign language recognition.
+            </p>
+
+            <div className="controls">
+              <a className="primary cta" href="#translator">
+                Start translating <ArrowUpRight />
+              </a>
+              <a className="secondary cta" href="#learn">
+                Explore ASL
+              </a>
+            </div>
+
+            <div className="hero-tags">
+              <span>Machine learning</span>
+              <span>Computer vision</span>
+              <span>Real-time AI</span>
+            </div>
+          </div>
+
+          <RobotHand />
+        </section>
+
+        <div className="stats-grid">
+          {[
+            ["96.91%", "Held-out test accuracy", BrainCircuit],
+            ["85.42%", "Live evaluation accuracy", Activity],
+            ["24", "Supported alphabets", Hand],
+            ["110", "Engineered features", Camera]
+          ].map(([value, label, Icon]) => (
+            <div className="stat-card" key={label}>
+              <Icon />
+              <strong>{value}</strong>
+              <span>{label}</span>
+            </div>
+          ))}
+        </div>
+
+        <section className="section gesture-section">
+          <div className="panel-heading">
+            <div>
+              <div className="eyebrow">VISUAL DICTIONARY</div>
+              <h2>ASL alphabet reference</h2>
+            </div>
+
+            <button onClick={() => setExpanded(v => !v)}>
+              {expanded ? "Hide gestures −" : "Show all gestures +"}
+            </button>
+          </div>
+
+          <div className="gesture-grid">
+            {(expanded ? LETTERS : LETTERS.slice(0, 8)).map(l => (
+              <div className="gesture-card" key={l}>
+                <img
+                  src={`${API}/assets/gestures/${l}.jpg`}
+                  alt={`ASL letter ${l}`}
+                  loading="lazy"
+                />
+                <strong>{l}</strong>
+              </div>
+            ))}
+          </div>
+
+          <p className="muted">
+            J and Z require motion and are not supported
+            by the current recognition model.
+          </p>
+        </section>
+
+        <LiveTranslator />
+
+        <section id="learn" className="section">
+          <div className="eyebrow">INTERACTIVE LEARNING</div>
+          <h2>Master the alphabet.</h2>
+
+          <div className="learn-grid">
+            <div className="panel challenge">
+              <div className="eyebrow">PRACTICE TARGET</div>
+              <h2>{target}</h2>
+              <img
+                src={`${API}/assets/gestures/${target}.jpg`}
+                alt={`Practice letter ${target}`}
+              />
+
+              <button className="primary" onClick={() => {
+                const choices = LETTERS.filter(l => l !== target);
+                setTarget(choices[Math.floor(
+                  Math.random() * choices.length
+                )]);
+              }}>
+                New challenge
+              </button>
+
+              <a href="#translator">Try this sign in the camera ↑</a>
+            </div>
+
+            <div className="panel">
+              <h3>Choose an alphabet</h3>
+              <div className="alphabet-grid">
+                {LETTERS.map(l => (
+                  <button
+                    key={l}
+                    className={target === l ? "selected" : ""}
+                    onClick={() => setTarget(l)}
+                  >
+                    {l}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section id="analytics" className="section">
+          <div className="eyebrow">MODEL PERFORMANCE</div>
+          <h2>Intelligence, measured.</h2>
+
+          <div className="analytics-grid">
+            <div className="panel">
+              <h3>Classification performance</h3>
+              {[
+                ["Test accuracy", 96.91],
+                ["Macro precision", 96.82],
+                ["Macro recall", 96.79],
+                ["Macro F1 score", 96.76],
+                ["Live accuracy", 85.42]
+              ].map(([name, value]) => (
+                <div className="metric-row" key={name}>
+                  <div className="panel-heading">
+                    <span>{name}</span>
+                    <strong>{value}%</strong>
+                  </div>
+                  <div className="progress">
+                    <div style={{ width: `${value}%` }} />
+                  </div>
+                </div>
+              ))}
+
+              <p className="muted">
+                Test set: 938 samples. Live evaluation:
+                41 correct predictions across 48 trials.
+              </p>
+
+              <a className="secondary cta"
+                href={`${API}/reports/final_model_metrics.csv`}
+                download>
+                View metrics CSV
+              </a>
+            </div>
+
+            <div className="panel">
+              <h3>Confusion matrix</h3>
+              <img className="matrix"
+                src={`${API}/reports/final_confusion_matrix.png`}
+                alt="Final model confusion matrix" />
+            </div>
+          </div>
+        </section>
+
+        <section id="about" className="section">
+          <div className="eyebrow">BEHIND THE TECHNOLOGY</div>
+          <h2>Built for communication.</h2>
+
+          <div className="panel">
+            <p>
+              Signify AI combines MediaPipe hand tracking,
+              geometric feature engineering and an advanced
+              Support Vector Machine to recognize 24 static
+              American Sign Language alphabet gestures.
+            </p>
+
+            <div className="pipeline">
+              {["Camera", "21 landmarks", "110 features",
+                "SVM classifier", "Text"].map(s => (
+                <span key={s}>{s}</span>
+              ))}
+            </div>
+
+            <p className="muted">
+              This is an academic fingerspelling recognition
+              system, not a complete ASL translation system.
+            </p>
+          </div>
+        </section>
+      </main>
+
+      <footer>
+        <div className="brand">SIGNIFY<span>AI</span></div>
+        <p>Your Hands. Your Voice.</p>
+        <span>Machine Learning Project</span>
+      </footer>
+    </>
+  );
+}
+
+export default App;

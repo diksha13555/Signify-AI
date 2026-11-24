@@ -1,0 +1,269 @@
+
+import { useState, useRef, useEffect } from "react";
+import { Canvas, useFrame } from "@react-three/fiber";
+import {
+  OrbitControls, Environment, RoundedBox,
+  ContactShadows, Float
+} from "@react-three/drei";
+import * as THREE from "three";
+
+const poses = {
+  A: [1.35, 1.35, 1.35, 1.35, 0.2],
+  B: [0, 0, 0, 0, 1.1],
+  C: [0.65, 0.65, 0.65, 0.65, 0.6],
+  E: [1.1, 1.1, 1.1, 1.1, 1.1],
+  H: [0, 0, 1.4, 1.4, 1.1],
+  I: [1.4, 1.4, 1.4, 0, 1.1],
+  K: [0, 0.25, 1.4, 1.4, 0.5],
+  L: [0, 1.4, 1.4, 1.4, 0],
+  N: [1.3, 1.3, 1.4, 1.4, 0.8],
+  O: [0.9, 0.9, 0.9, 0.9, 0.9],
+  S: [1.4, 1.4, 1.4, 1.4, 1.2],
+  T: [1.3, 1.4, 1.4, 1.4, 0.7],
+  U: [0, 0, 1.4, 1.4, 1.2],
+  V: [0, 0, 1.4, 1.4, 1.1],
+  W: [0, 0, 0, 1.4, 1.1],
+  Y: [1.4, 1.4, 1.4, 0, 0]
+};
+
+function Metal({ color = "#9baec3" }) {
+  return (
+    <meshStandardMaterial
+      color={color}
+      metalness={0.45}
+      roughness={0.35}
+    />
+  );
+}
+
+function Joint({ radius = 0.13 }) {
+  return (
+    <group>
+      <mesh>
+        <sphereGeometry args={[radius, 12, 12]} />
+        <Metal color="#26364b" />
+      </mesh>
+      <mesh position={[0, 0, radius * 0.75]}>
+        <torusGeometry args={[radius * 0.65, 0.022, 12, 32]} />
+        <meshStandardMaterial
+          color="#22d3ee"
+          emissive="#00c8ff"
+          emissiveIntensity={2.5}
+        />
+      </mesh>
+    </group>
+  );
+}
+
+function Finger({ x, y, length, bend, spread = 0 }) {
+  const a = useRef();
+  const b = useRef();
+  const c = useRef();
+  const lengths = [length * .43, length * .33, length * .24];
+
+  useFrame((_, dt) => {
+    if (!a.current || !b.current || !c.current) return;
+    const k = 1 - Math.exp(-7 * dt);
+    a.current.rotation.x = THREE.MathUtils.lerp(
+      a.current.rotation.x, bend * .75, k
+    );
+    b.current.rotation.x = THREE.MathUtils.lerp(
+      b.current.rotation.x, bend, k
+    );
+    c.current.rotation.x = THREE.MathUtils.lerp(
+      c.current.rotation.x, bend * .7, k
+    );
+  });
+
+  function Segment({ length: l }) {
+    return (
+      <RoundedBox
+        args={[.22, l, .24]}
+        radius={.07}
+        position={[0, l / 2, 0]}
+      >
+        <Metal />
+      </RoundedBox>
+    );
+  }
+
+  return (
+    <group position={[x, y, 0]} rotation={[0, 0, spread]}>
+      <group ref={a}>
+        <Joint />
+        <Segment length={lengths[0]} />
+
+        <group ref={b} position={[0, lengths[0], 0]}>
+          <Joint radius={.115} />
+          <Segment length={lengths[1]} />
+
+          <group ref={c} position={[0, lengths[1], 0]}>
+            <Joint radius={.1} />
+            <Segment length={lengths[2]} />
+          </group>
+        </group>
+      </group>
+    </group>
+  );
+}
+
+function Hand({ letter }) {
+  const p = poses[letter] || poses.B;
+
+  return (
+    <group position={[0, -.45, 0]}>
+      <RoundedBox args={[1.25, 1.4, .45]} radius={.2}>
+        <Metal />
+      </RoundedBox>
+
+      <RoundedBox
+        args={[.95, 1.1, .15]}
+        radius={.15}
+        position={[0, 0, .26]}
+      >
+        <Metal color="#152238" />
+      </RoundedBox>
+
+      <mesh position={[0, 0, .36]}>
+        <torusGeometry args={[.31, .045, 16, 64]} />
+        <meshStandardMaterial
+          color="#00d9ff"
+          emissive="#00bfff"
+          emissiveIntensity={3}
+        />
+      </mesh>
+
+      <mesh position={[0, 0, .37]}>
+        <sphereGeometry args={[.15, 16, 16]} />
+        <meshStandardMaterial
+          color="#8ceaff"
+          emissive="#22d3ee"
+          emissiveIntensity={1.8}
+        />
+      </mesh>
+
+      <Finger x={-.45} y={.65} length={1.25}
+        bend={p[0]} spread={letter === "V" ? .19 : .03} />
+      <Finger x={-.15} y={.69} length={1.48}
+        bend={p[1]} spread={letter === "V" ? -.19 : 0} />
+      <Finger x={.16} y={.67} length={1.34}
+        bend={p[2]} spread={-.03} />
+      <Finger x={.46} y={.59} length={1.05}
+        bend={p[3]} spread={-.08} />
+
+      <Finger x={-.65} y={-.35} length={.95}
+        bend={p[4]} spread={.95} />
+
+      <RoundedBox
+        args={[.65, .65, .45]}
+        radius={.1}
+        position={[0, -.95, 0]}
+      >
+        <Metal color="#34465e" />
+      </RoundedBox>
+
+      {[0, 1, 2].map(i => (
+        <RoundedBox
+          key={i}
+          args={[.69, .09, .48]}
+          radius={.025}
+          position={[0, -.75 - i * .18, 0]}
+        >
+          <Metal />
+        </RoundedBox>
+      ))}
+    </group>
+  );
+}
+
+export default function RobotHand() {
+  const [word, setWord] = useState("HELLO");
+  const [index, setIndex] = useState(0);
+  const [playing, setPlaying] = useState(true);
+
+  useEffect(() => {
+    if (!playing) return;
+    const timer = setInterval(() => {
+      setIndex(i => (i + 1) % word.length);
+    }, 1500);
+
+    return () => clearInterval(timer);
+  }, [word, playing]);
+
+  const letter = word[index] || "B";
+
+  return (
+    <div className="robot-container">
+      <div className="robot-status">
+        <span>SYS.01</span>
+        <span>● NEURAL LINK ACTIVE</span>
+      </div>
+
+      <div className="robot-letter">{letter}</div>
+
+      <div className="robot-canvas">
+        <Canvas
+          camera={{ position: [0, .5, 5.5], fov: 42 }}
+          dpr={1}
+        >
+          <ambientLight intensity={1.3} />
+          <directionalLight position={[4, 5, 5]} intensity={4} />
+          <pointLight position={[-3, 1, 2]}
+            color="#00cfff" intensity={35} />
+          <pointLight position={[3, 2, -2]}
+            color="#7655ff" intensity={30} />
+
+          
+
+          <Float speed={1.4} rotationIntensity={.08}
+            floatIntensity={.2}>
+            <Hand letter={letter} />
+          </Float>
+
+          
+
+          <OrbitControls
+            enablePan={false}
+            enableZoom
+            autoRotate={true}
+            autoRotateSpeed={1.2}
+            minDistance={3.5}
+            maxDistance={8}
+          />
+        </Canvas>
+      </div>
+
+      <div className="spelling">
+        {word.split("").map((l, i) => (
+          <span key={i} className={i === index ? "active" : ""}>
+            {l}
+          </span>
+        ))}
+      </div>
+
+      <div className="word-options">
+        {["HELLO", "AI", "THANKS", "YES", "CAN"].map(w => (
+          <button
+            key={w}
+            className={word === w ? "selected" : ""}
+            onClick={() => {
+              setWord(w);
+              setIndex(0);
+              setPlaying(true);
+            }}
+          >
+            {w}
+          </button>
+        ))}
+
+        <button onClick={() => setPlaying(p => !p)}>
+          {playing ? "Pause" : "Play"}
+        </button>
+      </div>
+
+      <p className="robot-hint">
+        DRAG TO ROTATE · SCROLL TO ZOOM
+      </p>
+    </div>
+  );
+}
