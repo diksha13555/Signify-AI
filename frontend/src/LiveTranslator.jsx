@@ -55,9 +55,9 @@ export default function LiveTranslator() {
         const c = canvas.current;
 
         if (v && c && v.readyState >= 2) {
-          c.width = 320;
+          c.width = 640;
           c.height = Math.round(
-            320 * v.videoHeight / v.videoWidth
+            640 * v.videoHeight / v.videoWidth
           );
 
           c.getContext("2d").drawImage(
@@ -65,7 +65,7 @@ export default function LiveTranslator() {
           );
 
           const blob = await new Promise(resolve =>
-            c.toBlob(resolve, "image/jpeg", 0.65)
+            c.toBlob(resolve, "image/jpeg", 0.90)
           );
 
           if (!blob) continue;
@@ -204,7 +204,7 @@ export default function LiveTranslator() {
               playsInline
               autoPlay
               style={{
-                visibility: running ? "visible" : "hidden"
+                visibility: running && !processed ? "visible" : "hidden"
               }}
             />
 
