@@ -187,3 +187,49 @@ def predict(file: UploadFile = File(...)):
             status_code=500,
             detail="Recognition failed"
         )
+
+
+from pydantic import BaseModel
+from src.engine import engineer_features
+
+class LandmarkInput(BaseModel):
+    landmarks: list[list[float]]
+
+@app.post("/api/landmarks")
+def predict_landmarks(payload: LandmarkInput):
+    start = time.perf_counter()
+
+    if engine is None:
+        raise HTTPException(503, "Model loading")
+
+    points = np.asarray(payload.landmarks, dtype=np.float32)
+
+    if points.shape != (21, 3) or not np.isfinite(points).all():
+        raise HTTPException(400, "Invalid landmarks")
+
+    points -= points[0].copy()
+    scale = np.linalg.norm(points, axis=1).max()
+
+    if scale < 1e-8:
+        raise HTTPException(400, "Invalid hand geometry")
+
+    points /= scale
+
+    features = engineer_features(points)[None, :]
+
+    with prediction_lock:
+        letter = str(engine.model.predict(features)[0])
+        probabilities = engine.model.predict_proba(features)[0]
+
+    confidence = float(
+        probabilities[list(engine.model.classes_).index(letter)]
+    )
+
+    return {
+        "success": True,
+        "letter": letter,
+        "confidence": confidence,
+        "latency_ms": round(
+            (time.perf_counter() - start) * 1000, 2
+        )
+    }

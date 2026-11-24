@@ -1,3 +1,8 @@
+import {
+  HandLandmarker,
+  FilesetResolver
+} from "@mediapipe/tasks-vision";
+
 
 import { useState, useRef, useEffect } from "react";
 import {
@@ -9,6 +14,13 @@ const API = "";
 
 export default function LiveTranslator() {
   const video = useRef(null);
+  const detector = useRef(null);
+  const overlay = useRef(null);
+  const animation = useRef(0);
+  const pending = useRef(false);
+  const lastRequest = useRef(0);
+  const handEpoch = useRef(0);
+  const starting = useRef(false);
   const canvas = useRef(null);
   const stream = useRef(null);
   const active = useRef(false);
@@ -30,6 +42,14 @@ export default function LiveTranslator() {
   const [error, setError] = useState("");
 
   function stopCamera() {
+    cancelAnimationFrame(animation.current);
+    handEpoch.current += 1;
+    matches.current = 0;
+    missing.current = 0;
+    if (overlay.current) {
+      const o = overlay.current;
+      o.getContext("2d").clearRect(0, 0, o.width, o.height);
+    }
     active.current = false;
     generation.current += 1;
     stream.current?.getTracks().forEach(t => t.stop());
@@ -50,109 +70,229 @@ export default function LiveTranslator() {
     };
   }, []);
 
-  async function predictLoop(id) {
-    while (active.current && generation.current === id) {
-      try {
-        const v = video.current;
-        const c = canvas.current;
+  async function browserTracker() {
+    if (detector.current) return;
 
-        if (v && c && v.readyState >= 2) {
-          c.width = 640;
-          c.height = Math.round(
-            640 * v.videoHeight / v.videoWidth
-          );
+    const vision = await FilesetResolver.forVisionTasks("/wasm");
 
-          c.getContext("2d").drawImage(
-            v, 0, 0, c.width, c.height
-          );
+    detector.current = await HandLandmarker.createFromOptions(
+      vision,
+      {
+        baseOptions: {
+          modelAssetPath: "/models/hand_landmarker.task",
+          delegate: "CPU"
+        },
+        runningMode: "VIDEO",
+        numHands: 1,
+        minHandDetectionConfidence: 0.3,
+        minHandPresenceConfidence: 0.3,
+        minTrackingConfidence: 0.4
+      }
+    );
+  }
 
-          const blob = await new Promise(resolve =>
-            c.toBlob(resolve, "image/jpeg", 0.75)
-          );
+  async function classify(points, id, epoch) {
+    pending.current = true;
 
-          if (!blob) continue;
+    try {
+      const response = await fetch("/api/landmarks", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ landmarks: points }),
+        signal: AbortSignal.timeout(15000)
+      });
 
-          const form = new FormData();
-          form.append("file", blob, "frame.jpg");
-
-          const response = await fetch(
-            `${API}/api/predict`,
-            {
-              method: "POST",
-              body: form,
-              signal: AbortSignal.timeout(10000)
-            }
-          );
-
-          if (!response.ok) {
-            throw new Error("Prediction request failed");
-          }
-
-          const data = await response.json();
-
-          if (!active.current ||
-              generation.current !== id) return;
-
-          const detected = data.letter || "";
-
-          setLetter(detected);
-          setConfidence(data.confidence || 0);
-          setProcessed("");
-          setLatency(data.latency_ms || 0);
-          setError("");
-
-          if (!detected) {
-            missing.current += 1;
-            matches.current = 0;
-            stable.current = { letter: "", since: 0 };
-
-            if (missing.current >= 3) {
-              latched.current = "";
-            }
-          } else {
-            missing.current = 0;
-
-            if (data.confidence >= 0.80) {
-              if (stable.current.letter === detected) {
-                matches.current += 1;
-              } else {
-                matches.current = 1;
-                stable.current = {
-                  letter: detected,
-                  since: Date.now()
-                };
-              }
-
-              if (
-                autoRef.current &&
-                matches.current >= 3 &&
-                latched.current !== detected
-              ) {
-                setWord(w => w + detected);
-                latched.current = detected;
-                matches.current = 0;
-              }
-            } else {
-              matches.current = 0;
-              stable.current = { letter: "", since: 0 };
-            }
-          }
-        }
-      } catch (err) {
-        if (generation.current !== id) return;
-        setError(err.message);
-        await new Promise(r => setTimeout(r, 500));
+      if (!response.ok) {
+        throw new Error("Recognition API unavailable");
       }
 
-      await new Promise(r => setTimeout(r, 180));
+      const data = await response.json();
+
+      if (!active.current ||
+          generation.current !== id ||
+          handEpoch.current !== epoch) return;
+
+      const detected = data.letter || "";
+      const conf = data.confidence || 0;
+
+      setLetter(detected);
+      setConfidence(conf);
+      setLatency(data.latency_ms || 0);
+      setError("");
+
+      if (conf >= 0.80 && detected) {
+        if (stable.current.letter === detected) {
+          matches.current += 1;
+        } else {
+          stable.current = {
+            letter: detected,
+            since: Date.now()
+          };
+          matches.current = 1;
+        }
+
+        if (
+          autoRef.current &&
+          matches.current >= 3 &&
+          Date.now() - stable.current.since >= 600 &&
+          latched.current !== detected
+        ) {
+          setWord(w => w + detected);
+          latched.current = detected;
+          matches.current = 0;
+        }
+      } else {
+        matches.current = 0;
+        stable.current = { letter: "", since: 0 };
+      }
+
+    } catch (err) {
+      if (active.current && generation.current === id) {
+        setError(err.message);
+        matches.current = 0;
+      }
+    } finally {
+      pending.current = false;
     }
   }
 
+  function predictLoop(id) {
+    let lastFrame = -1;
+    let lastDetection = 0;
+
+    const edges = [
+      [0,1],[1,2],[2,3],[3,4],
+      [0,5],[5,6],[6,7],[7,8],
+      [5,9],[9,10],[10,11],[11,12],
+      [9,13],[13,14],[14,15],[15,16],
+      [13,17],[0,17],[17,18],[18,19],[19,20]
+    ];
+
+    function tick(now) {
+      if (!active.current || generation.current !== id) return;
+
+      animation.current = requestAnimationFrame(tick);
+
+      const v = video.current;
+      const c = canvas.current;
+      const o = overlay.current;
+
+      if (!v || !c || !o || v.readyState < 2) return;
+      if (v.currentTime === lastFrame || now - lastDetection < 66) return;
+
+      lastFrame = v.currentTime;
+      lastDetection = now;
+
+      try {
+        const w = v.videoWidth;
+        const h = v.videoHeight;
+        const size = Math.max(w, h);
+        const scale = 224 / size;
+        const left = (size - w) / 2;
+        const top = (size - h) / 2;
+
+        c.width = 224;
+        c.height = 224;
+
+        const input = c.getContext("2d");
+        input.fillStyle = "#000";
+        input.fillRect(0, 0, 224, 224);
+
+        input.drawImage(
+          v,
+          left * scale,
+          top * scale,
+          w * scale,
+          h * scale
+        );
+
+        const result = detector.current.detectForVideo(c, now);
+        const hand = result.landmarks?.[0];
+
+        if (o.width !== w || o.height !== h) {
+          o.width = w;
+          o.height = h;
+        }
+
+        const ctx = o.getContext("2d");
+        ctx.clearRect(0, 0, w, h);
+
+        if (!hand) {
+          missing.current += 1;
+          handEpoch.current += 1;
+          matches.current = 0;
+          stable.current = { letter: "", since: 0 };
+
+          if (missing.current >= 5) {
+            latched.current = "";
+            setLetter("");
+            setConfidence(0);
+          }
+          return;
+        }
+
+        missing.current = 0;
+
+        const xy = hand.map(p => ({
+          x: p.x * size - left,
+          y: p.y * size - top
+        }));
+
+        ctx.strokeStyle = "#00e5ff";
+        ctx.lineWidth = 2.5;
+
+        for (const [a,b] of edges) {
+          ctx.beginPath();
+          ctx.moveTo(xy[a].x, xy[a].y);
+          ctx.lineTo(xy[b].x, xy[b].y);
+          ctx.stroke();
+        }
+
+        ctx.fillStyle = "#ffdf45";
+
+        for (const p of xy) {
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, 4, 0, Math.PI * 2);
+          ctx.fill();
+        }
+
+        const xs = xy.map(p => p.x);
+        const ys = xy.map(p => p.y);
+
+        ctx.strokeRect(
+          Math.min(...xs) - 10,
+          Math.min(...ys) - 10,
+          Math.max(...xs) - Math.min(...xs) + 20,
+          Math.max(...ys) - Math.min(...ys) + 20
+        );
+
+        if (!pending.current &&
+            now - lastRequest.current >= 250) {
+          lastRequest.current = now;
+
+          classify(
+            hand.map(p => [p.x, p.y, p.z]),
+            id,
+            handEpoch.current
+          );
+        }
+      } catch (err) {
+        setError(err.message);
+        stopCamera();
+      }
+    }
+
+    animation.current = requestAnimationFrame(tick);
+  }
+
   async function startCamera() {
-    if (active.current) return;
+    if (active.current || starting.current) return;
+    starting.current = true;
 
     try {
       setError("");
+
+      await browserTracker();
 
       const media = await navigator.mediaDevices.getUserMedia({
         video: {
@@ -213,14 +353,18 @@ export default function LiveTranslator() {
             </span>
           </div>
 
-          <div className="camera-frame">
+          <div className="camera-frame" style={{ position: "relative" }}>
             <video
               ref={video}
               muted
               playsInline
               autoPlay
               style={{
-                visibility: running ? "visible" : "hidden"
+                visibility: running ? "visible" : "hidden",
+                objectFit: "contain",
+                width: "100%",
+                height: "100%",
+                transform: "none"
               }}
             />
 
@@ -241,6 +385,19 @@ export default function LiveTranslator() {
             )}
 
             <canvas ref={canvas} hidden />
+
+            <canvas
+              ref={overlay}
+              style={{
+                position: "absolute",
+                inset: 0,
+                width: "100%",
+                height: "100%",
+                objectFit: "contain",
+                pointerEvents: "none",
+                zIndex: 2
+              }}
+            />
           </div>
 
           <div className="controls">
