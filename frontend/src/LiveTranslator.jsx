@@ -16,6 +16,8 @@ export default function LiveTranslator() {
   const stable = useRef({ letter: "", since: 0 });
   const latched = useRef("");
   const autoRef = useRef(true);
+  const matches = useRef(0);
+  const missing = useRef(0);
 
   const [running, setRunning] = useState(false);
   const [letter, setLetter] = useState("");
@@ -65,7 +67,7 @@ export default function LiveTranslator() {
           );
 
           const blob = await new Promise(resolve =>
-            c.toBlob(resolve, "image/jpeg", 0.90)
+            c.toBlob(resolve, "image/jpeg", 0.75)
           );
 
           if (!blob) continue;
@@ -95,31 +97,45 @@ export default function LiveTranslator() {
 
           setLetter(detected);
           setConfidence(data.confidence || 0);
-          setProcessed(data.image || "");
+          setProcessed("");
           setLatency(data.latency_ms || 0);
           setError("");
 
           if (!detected) {
-            latched.current = "";
+            missing.current += 1;
+            matches.current = 0;
             stable.current = { letter: "", since: 0 };
-          } else if (data.confidence >= 0.65) {
-            if (stable.current.letter !== detected) {
-              stable.current = {
-                letter: detected,
-                since: Date.now()
-              };
-            }
 
-            if (
-              autoRef.current &&
-              Date.now() - stable.current.since >= 900 &&
-              latched.current !== detected
-            ) {
-              setWord(w => w + detected);
-              latched.current = detected;
+            if (missing.current >= 3) {
+              latched.current = "";
             }
           } else {
-            stable.current = { letter: "", since: 0 };
+            missing.current = 0;
+
+            if (data.confidence >= 0.80) {
+              if (stable.current.letter === detected) {
+                matches.current += 1;
+              } else {
+                matches.current = 1;
+                stable.current = {
+                  letter: detected,
+                  since: Date.now()
+                };
+              }
+
+              if (
+                autoRef.current &&
+                matches.current >= 3 &&
+                latched.current !== detected
+              ) {
+                setWord(w => w + detected);
+                latched.current = detected;
+                matches.current = 0;
+              }
+            } else {
+              matches.current = 0;
+              stable.current = { letter: "", since: 0 };
+            }
           }
         }
       } catch (err) {
@@ -204,7 +220,7 @@ export default function LiveTranslator() {
               playsInline
               autoPlay
               style={{
-                visibility: running && !processed ? "visible" : "hidden"
+                visibility: running ? "visible" : "hidden"
               }}
             />
 
@@ -216,7 +232,7 @@ export default function LiveTranslator() {
               </div>
             )}
 
-            {running && processed && (
+            {false && running && processed && (
               <img
                 className="tracking-preview"
                 src={processed}
